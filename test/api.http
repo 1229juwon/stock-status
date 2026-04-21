@@ -1,0 +1,4 @@
+### 한국 주식 테스트 (삼성전자 - 005930)
+GET https://polling.finance.naver.com/api/realtime?query=SERVICE_ITEM:005930
+User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)
+Referer: https://finance.naver.com

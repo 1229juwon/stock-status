@@ -1,0 +1,8 @@
+{
+  "editor.tabCompletion": "on",
+  "editor.codeActionsOnSave": [
+      "editor.formatOnSave", "source.organizeImports", "source.sortImports", "source.fixAll"
+  ],
+  "files.encoding": "utf8",
+  "files.autoGuessEncoding": false
+}
