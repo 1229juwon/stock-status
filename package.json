@@ -1,6 +1,6 @@
 {
-	"name": "stock-status",
-	"displayName": "Stock Status",
+	"name": "korea-stock-status",
+	"displayName": "Korea Stock Status",
 	"description": "한국주식 모니터링",
 	"version": "1.0.0",
 	"publisher": "1229juwon",
