@@ -1,38 +1,18 @@
 import * as vscode from 'vscode';
-import Configuration from './configuration';
-import logger from './logger/logger';
-import Stock from './models/stock';
-import { stockProvider } from './providers/provider';
-import { render, stopAllRender } from './render';
+import { MESSAGES } from './constants';
+import { StockManager } from './managers/StockManager';
+import { StockRenderer } from './renderers/StockRenderer';
+import { StockTimer } from './timers/StockTimer';
 import { StockQuickPickItem } from './vscode/StockQuickPickItem';
 
 export default class StockStatusController {
-	private timer: ReturnType<typeof setInterval> | null = null;
-	private stocks: Stock[] = [];
+	private stockManager = new StockManager();
+	private stockTimer = new StockTimer();
+	private stockRenderer = new StockRenderer();
 	private quickPick = this.createQuickPick();
 
 	constructor() {
-		this.stocks = this.loadChoiceStocks();
-	}
-
-	/**
-	 * 주식이 유효한지 확인
-	 */
-	private isValidStock(stock: Stock): boolean {
-		return !!(stock.name && stock.name !== '---');
-	}
-
-	/**
-	 * 정규화된 코드로 주식이 이미 존재하는지 확인
-	 */
-	private stockExists(code: string): boolean {
-		const normalizedCode = code.toLowerCase();
-		const currentStocks = Configuration.getStocks() || [];
-		return currentStocks.some((item) =>
-			typeof item === 'string'
-				? item.toLowerCase() === normalizedCode
-				: item.code.toLowerCase() === normalizedCode,
-		);
+		this.stockTimer.setCallback(this.ticker.bind(this));
 	}
 
 	private createQuickPick(): vscode.QuickPick<StockQuickPickItem> {
@@ -49,36 +29,9 @@ export default class StockStatusController {
 		return picker;
 	}
 
-	private loadChoiceStocks(): Stock[] {
-		return Configuration.getStocks().map((item) => {
-			if (typeof item === 'string') return new Stock(item);
-			if (typeof item === 'object')
-				return new Stock(item.code, item.alias, item.hold_price, item.hold_num);
-			throw new Error(
-				'설정 형식 오류, https://github.com/1229juwon/stock-status 문서를 참고해주세요.',
-			);
-		});
-	}
-
 	private async ticker(): Promise<void> {
-		try {
-			logger.debug('call fetchData');
-			const stockData = await stockProvider.fetch(
-				this.stocks.map((s) => s.code),
-			);
-
-			stockData.forEach((data) => {
-				const stock = this.stocks.find(
-					(s) => s.code.toLowerCase() === data.code,
-				);
-				stock?.update(data);
-			});
-
-			logger.debug('render');
-			render(this.stocks);
-		} catch (error) {
-			logger.error('%O', error);
-		}
+		await this.stockManager.fetchStockData();
+		this.stockRenderer.render(this.stockManager.getStocks());
 	}
 
 	private openQuickPick(items: StockQuickPickItem[], title = ''): void {
@@ -90,15 +43,22 @@ export default class StockStatusController {
 	}
 
 	private async searchStocks(query: string): Promise<void> {
-		const stockItems = await stockProvider.fetch([query]);
-		const selectionItems: StockQuickPickItem[] = stockItems.map((data) => {
-			const stock = new Stock(data.code || '', '');
-			stock.update(data);
-			return {
-				label: this.isValidStock(stock) ? stock.name || '' : '결과 없음',
+		const stock = await this.stockManager.searchStock(query);
+		const selectionItems: StockQuickPickItem[] = [];
+
+		if (stock) {
+			selectionItems.push({
+				label: stock.name || '',
 				action: () => this.handleStockSelection(stock),
-			};
-		});
+			});
+		} else {
+			selectionItems.push({
+				label: '결과 없음',
+				action: () => {
+					// No operation
+				},
+			});
+		}
 
 		selectionItems.push({
 			label: '돌아가기',
@@ -108,39 +68,17 @@ export default class StockStatusController {
 		this.openQuickPick(selectionItems);
 	}
 
-	private async handleStockSelection(stock: Stock): Promise<void> {
-		if (!this.isValidStock(stock)) {
-			vscode.window.showErrorMessage(
-				'해당 주식 코드가 존재하지 않습니다. 다시 추가해 주세요!',
-			);
+	private async handleStockSelection(stock: any): Promise<void> {
+		if (!stock.isValid()) {
+			vscode.window.showErrorMessage(MESSAGES.STOCK_NOT_FOUND);
 			return;
 		}
 
-		const code = stock.code.toLowerCase();
-		if (this.stockExists(code)) {
-			vscode.window.showInformationMessage(
-				`주식 ${stock.name} (${code})는 이미 존재합니다!`,
-			);
-			return;
+		const added = await this.stockManager.addStock(stock.code, stock.name);
+		if (added) {
+			this.quickPick.hide();
+			this.restart();
 		}
-
-		const currentStocks = Configuration.getStocks() || [];
-		currentStocks.push({
-			code,
-			alias: stock.name,
-			hold_price: 0,
-			hold_num: 0,
-		});
-		await Configuration.updateSetting(
-			'stocks',
-			currentStocks,
-			vscode.ConfigurationTarget.Global,
-		);
-		vscode.window.showInformationMessage(
-			`성공적으로 추가됨: ${stock.name} (${code})`,
-		);
-		this.quickPick.hide();
-		this.restart();
 	}
 
 	private async openSearch(): Promise<void> {
@@ -155,17 +93,13 @@ export default class StockStatusController {
 	}
 
 	public restart(): void {
-		const interval = Configuration.getUpdateInterval();
-		if (this.timer) clearInterval(this.timer);
-		this.stocks = this.loadChoiceStocks();
-		this.timer = setInterval(() => this.ticker(), interval);
-		this.ticker();
+		this.stockManager.loadStocks();
+		this.stockTimer.start();
 	}
 
 	public stop(): void {
-		if (this.timer) clearInterval(this.timer);
-		this.timer = null;
-		stopAllRender();
+		this.stockTimer.stop();
+		this.stockRenderer.stopAllRender();
 	}
 
 	public registerCommands(context: vscode.ExtensionContext): void {
@@ -178,7 +112,7 @@ export default class StockStatusController {
 				this.openSearch(),
 			),
 			vscode.workspace.onDidChangeConfiguration(() => {
-				if (this.timer) this.restart();
+				if (this.stockTimer.isRunning()) this.restart();
 			}),
 		);
 
@@ -186,7 +120,7 @@ export default class StockStatusController {
 	}
 
 	public dispose(): void {
-		this.stop(); // 타이머 정리
-		this.quickPick.dispose(); // QuickPick 해제
+		this.stop();
+		this.quickPick.dispose();
 	}
 }

@@ -24,6 +24,7 @@ export default class Stock {
 		this.hold_price = hold_price ?? 0;
 		this.hold_num = hold_num ?? 0;
 	}
+
 	update(origin: Partial<Stock>): void {
 		const numericFields: (keyof Pick<
 			Stock,
@@ -37,5 +38,36 @@ export default class Stock {
 				(this[field] as number) = origin[field] as number;
 			}
 		});
+	}
+
+	/**
+	 * 주식이 유효한지 확인
+	 */
+	isValid(): boolean {
+		return !!(this.name && this.name !== '---');
+	}
+
+	/**
+	 * 일일 손익 계산
+	 */
+	getDailyPnL(): number {
+		if (this.hold_num <= 0) return 0;
+		return Math.round(this.updown * this.hold_num);
+	}
+
+	/**
+	 * 보유 손익 계산
+	 */
+	getTotalPnL(): number {
+		if (this.hold_num <= 0) return 0;
+		const effectivePrice = this.price || this.yestclose || this.hold_price;
+		return Math.round((effectivePrice - this.hold_price) * this.hold_num);
+	}
+
+	/**
+	 * 표시 이름 반환
+	 */
+	getDisplayName(): string {
+		return this.alias || this.name || this.code;
 	}
 }
