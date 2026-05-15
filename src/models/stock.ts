@@ -2,15 +2,33 @@ export default class Stock {
 	code: string;
 	name: string | null;
 	alias: string;
+	standardPrice = 0;
+	price = 0;
+	change = 0;
 	hold_price = 0;
 	hold_num = 0;
-	price = 0;
 	updown = 0;
 	percent = 0;
+	riseFallFlag = '';
+	marketType = '';
+	marketStatus = '';
+	tradingHaltYn = '';
 	high = 0;
 	low = 0;
 	open = 0;
 	yestclose = 0;
+	upperLimit = 0;
+	lowerLimit = 0;
+	volume = 0;
+	amount = 0;
+	nav = 0;
+	estimatedEps = 0;
+	eps = 0;
+	bps = 0;
+	consensusEps = 0;
+	dividend = 0;
+	listedShares = 0;
+	afterMarketInfo = '';
 
 	constructor(
 		code: string,
@@ -26,18 +44,57 @@ export default class Stock {
 	}
 
 	update(origin: Partial<Stock>): void {
-		const numericFields: (keyof Pick<
-			Stock,
-			'price' | 'high' | 'low' | 'updown' | 'percent' | 'open' | 'yestclose'
-		>)[] = ['price', 'high', 'low', 'updown', 'percent', 'open', 'yestclose'];
+		const numericFields: (keyof Stock)[] = [
+			'standardPrice',
+			'price',
+			'change',
+			'updown',
+			'percent',
+			'high',
+			'low',
+			'open',
+			'yestclose',
+			'upperLimit',
+			'lowerLimit',
+			'volume',
+			'amount',
+			'nav',
+			'estimatedEps',
+			'eps',
+			'bps',
+			'consensusEps',
+			'dividend',
+			'listedShares',
+		];
 
-		if (origin.name !== undefined) this.name = origin.name;
+		if (origin.name !== undefined) {
+			this.name = origin.name;
+		}
+		if (origin.riseFallFlag !== undefined) {
+			this.riseFallFlag = origin.riseFallFlag;
+		}
+		if (origin.marketType !== undefined) {
+			this.marketType = origin.marketType;
+		}
+		if (origin.marketStatus !== undefined) {
+			this.marketStatus = origin.marketStatus;
+		}
+		if (origin.tradingHaltYn !== undefined) {
+			this.tradingHaltYn = origin.tradingHaltYn;
+		}
+		if (origin.afterMarketInfo !== undefined) {
+			this.afterMarketInfo = origin.afterMarketInfo;
+		}
 
 		numericFields.forEach((field) => {
 			if (origin[field] !== undefined) {
 				(this[field] as number) = origin[field] as number;
 			}
 		});
+
+		if (origin.change !== undefined && origin.updown === undefined) {
+			this.updown = origin.change;
+		}
 	}
 
 	/**

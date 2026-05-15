@@ -9,6 +9,6 @@ export const MESSAGES = {
 } as const;
 
 export const DEFAULTS = {
-	UPDATE_INTERVAL: 5000,
+	UPDATE_INTERVAL: 3000,
 	SHOW_ACCOUNT_PNL: true,
 } as const;

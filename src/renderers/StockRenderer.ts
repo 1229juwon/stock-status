@@ -12,8 +12,42 @@ function formatPercent(num: number): string {
 	return keepDecimal(num, 2) + '%';
 }
 
-function getTrendIcon(percent: number): string {
-	return percent > 0 ? '📈' : percent < 0 ? '📉' : '➡️';
+function getPercentPrefix(riseFallFlag: string): string {
+	switch (riseFallFlag) {
+		case '1':
+		case '2':
+			return '+';
+		case '4':
+		case '5':
+			return '-';
+		default:
+			return '';
+	}
+}
+
+function getTrendDirection(
+	riseFallFlag: string,
+): 'up' | 'down' | 'neutral' | 'unknown' {
+	switch (riseFallFlag) {
+		case '1':
+		case '2':
+			return 'up';
+		case '3':
+			return 'neutral';
+		case '4':
+		case '5':
+			return 'down';
+		default:
+			return 'unknown';
+	}
+}
+
+function getTrendIcon(stock: Stock): string {
+	const direction = getTrendDirection(stock.riseFallFlag);
+	if (direction === 'up') return '📈';
+	if (direction === 'down') return '📉';
+	if (direction === 'neutral') return '➡️';
+	return stock.percent > 0 ? '📈' : stock.percent < 0 ? '📉' : '➡️';
 }
 
 function getPnLColor(pnl: number): string {
@@ -92,20 +126,22 @@ export class StockRenderer {
 	}
 
 	private getItemColor(stock: Stock): string | vscode.ThemeColor | undefined {
-		return stock.percent >= 0
-			? Configuration.getRiseColor()
-			: Configuration.getFallColor();
+		const direction = getTrendDirection(stock.riseFallFlag);
+		if (direction === 'up') return Configuration.getRiseColor();
+		if (direction === 'down') return Configuration.getFallColor();
+		return undefined;
 	}
 
 	private getItemText(stock: Stock): string {
 		const hasHold = stock.hold_num > 0;
 		const showAccountPnL = Configuration.getShowAccountPnL();
 		const formattedPrice = Math.round(stock.price).toLocaleString();
+		const percentPrefix = getPercentPrefix(stock.riseFallFlag);
 		const base = format(
 			'%s %s (%s%)',
 			stock.getDisplayName(),
 			formattedPrice,
-			keepDecimal(stock.percent, 2),
+			`${percentPrefix}${keepDecimal(stock.percent, 2)}`,
 		);
 		if (showAccountPnL && hasHold) {
 			// TODO: Implement account P&L display
@@ -116,20 +152,18 @@ export class StockRenderer {
 
 	private getTooltipMarkdown(stock: Stock): vscode.MarkdownString {
 		const hasHold = stock.hold_num > 0;
-		const trendIcon = getTrendIcon(stock.percent);
+		const trendIcon = getTrendIcon(stock);
+		const direction = getTrendDirection(stock.riseFallFlag);
+		const priceSign =
+			direction === 'down' ? '-' : direction === 'up' ? '+' : '';
+		const percentPrefix = getPercentPrefix(stock.riseFallFlag);
 
 		let markdown = `**${trendIcon} ${stock.getDisplayName()}**\n\n`;
-		markdown += `| 항목 | 값 |\n`;
-		markdown += `|------|-----|\n`;
-		markdown += `| 현재가 | ${formatNumber(stock.price)}원 |\n`;
-		markdown += `| 등락 | ${stock.updown > 0 ? '+' : ''}${formatNumber(
+		markdown += `**${formatNumber(stock.price)}원** (${priceSign}${formatNumber(
 			stock.updown,
-		)}원 |\n`;
-		markdown += `| 등락률 | ${formatPercent(stock.percent)} |\n`;
-		markdown += `| 최고가 | ${formatNumber(stock.high)}원 |\n`;
-		markdown += `| 최저가 | ${formatNumber(stock.low)}원 |\n`;
-		markdown += `| 시가 | ${formatNumber(stock.open)}원 |\n`;
-		markdown += `| 전일종가 | ${formatNumber(stock.yestclose)}원 |\n`;
+		)}원 / ${percentPrefix}${formatPercent(stock.percent)})\n\n`;
+		markdown += `일중 최고가: ${formatNumber(stock.high)}원\n\n`;
+		markdown += `일중 최저가: ${formatNumber(stock.low)}원\n\n`;
 
 		if (hasHold) {
 			const dailyPnL = stock.getDailyPnL();
@@ -137,21 +171,16 @@ export class StockRenderer {
 			const dailyColor = getPnLColor(dailyPnL);
 			const totalColor = getPnLColor(totalPnL);
 
-			markdown += `\n**📊 보유 정보**\n\n`;
-			markdown += `| 항목 | 수량 | 가격 |\n`;
-			markdown += `|------|------|------|\n`;
-			markdown += `| 보유수량 | ${stock.hold_num.toLocaleString()}주 | ${formatNumber(
+			markdown += `\n---\n\n`;
+			markdown += `**보유:** ${stock.hold_num.toLocaleString()}주 (평단: ${formatNumber(
 				stock.hold_price,
-			)}원 |\n`;
-			markdown += `\n**💰 손익 정보**\n\n`;
-			markdown += `| 구분 | 금액 |\n`;
-			markdown += `|------|------|\n`;
-			markdown += `| 일일손익 | ${dailyColor} ${
+			)}원)\n\n`;
+			markdown += `**일일손익:** ${dailyColor} ${
 				dailyPnL > 0 ? '+' : ''
-			}${formatNumber(dailyPnL)}원 |\n`;
-			markdown += `| 누적손익 | ${totalColor} ${
+			}${formatNumber(dailyPnL)}원\n\n`;
+			markdown += `**누적손익:** ${totalColor} ${
 				totalPnL > 0 ? '+' : ''
-			}${formatNumber(totalPnL)}원 |\n`;
+			}${formatNumber(totalPnL)}원\n`;
 		}
 
 		const md = new vscode.MarkdownString(markdown);

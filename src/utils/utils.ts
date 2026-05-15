@@ -19,10 +19,12 @@ const getDecimalPlaces = (num: number): number => {
  */
 export const calcFixedNumber = (item: Stock): number => {
 	const priceFields = [
+		item.standardPrice,
 		item.high,
 		item.low,
 		item.open,
 		item.yestclose,
+		item.change,
 		item.updown,
 	];
 	const maxDecimals = Math.max(...priceFields.map(getDecimalPlaces));

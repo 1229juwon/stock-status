@@ -34,7 +34,7 @@ export default class Configuration {
 	 * 데이터 업데이트 간격(밀리초) 반환
 	 */
 	static getUpdateInterval(): number {
-		return this.getSetting('updateInterval', 5000);
+		return this.getSetting('updateInterval', 3000);
 	}
 
 	/**
