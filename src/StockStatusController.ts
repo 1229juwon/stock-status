@@ -83,8 +83,8 @@ export default class StockStatusController {
 
 	private async openSearch(): Promise<void> {
 		const input = await vscode.window.showInputBox({
-			prompt: '한국 주식 코드(숫자만)를 입력해주세요. ex)005930(삼성전자)',
-			placeHolder: '주식 코드 ex)005930',
+			prompt: '한국(6자리) 또는 해외 주식 티커를 입력해주세요. ex)005930, AAPL',
+			placeHolder: '주식 코드 ex)005930 또는 AAPL',
 		});
 
 		if (input?.trim()) {

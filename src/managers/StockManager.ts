@@ -71,11 +71,17 @@ export class StockManager {
 			hold_price: 0,
 			hold_num: 0,
 		});
-		await Configuration.updateSetting(
-			'stocks',
-			currentStocks,
-			vscode.ConfigurationTarget.Global,
-		);
+		try {
+			await Configuration.updateSetting(
+				'stocks',
+				currentStocks,
+				vscode.ConfigurationTarget.Global,
+			);
+		} catch (error) {
+			logger.error('%O', error);
+			vscode.window.showErrorMessage(MESSAGES.SETTINGS_UNSAVED);
+			return false;
+		}
 		vscode.window.showInformationMessage(
 			MESSAGES.STOCK_ADDED_SUCCESS(name, normalizedCode),
 		);

@@ -10,6 +10,7 @@ export default class Stock {
 	updown = 0;
 	percent = 0;
 	riseFallFlag = '';
+	currency = '';
 	marketType = '';
 	marketStatus = '';
 	tradingHaltYn = '';
@@ -72,6 +73,9 @@ export default class Stock {
 		}
 		if (origin.riseFallFlag !== undefined) {
 			this.riseFallFlag = origin.riseFallFlag;
+		}
+		if (origin.currency !== undefined) {
+			this.currency = origin.currency;
 		}
 		if (origin.marketType !== undefined) {
 			this.marketType = origin.marketType;

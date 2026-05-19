@@ -4,8 +4,39 @@ import Configuration from '../configuration';
 import Stock from '../models/stock';
 import { keepDecimal } from '../utils/utils';
 
-function formatNumber(num: number): string {
-	return Math.round(num).toLocaleString();
+function isKrw(stock: Stock): boolean {
+	const currency = (stock.currency || '').toUpperCase();
+	return !currency || currency === 'KRW';
+}
+
+function getCurrencyLabel(stock: Stock): string {
+	const currency = (stock.currency || '').toUpperCase();
+	if (!currency || currency === 'KRW') return '원';
+	return currency;
+}
+
+function formatAmount(stock: Stock, num: number): string {
+	if (!Number.isFinite(num)) return '--';
+	if (isKrw(stock)) return Math.round(num).toLocaleString();
+	return num.toLocaleString(undefined, {
+		minimumFractionDigits: 2,
+		maximumFractionDigits: 2,
+	});
+}
+
+function formatAmountWithCurrency(stock: Stock, num: number): string {
+	const formatted = formatAmount(stock, num);
+	if (formatted === '--') return formatted;
+	const currencyLabel = getCurrencyLabel(stock);
+	if (!currencyLabel) return formatted;
+	return isKrw(stock) ? `${formatted}${currencyLabel}` : `${formatted} ${currencyLabel}`;
+}
+
+function formatAmountForBar(stock: Stock, num: number): string {
+	const formatted = formatAmount(stock, num);
+	if (formatted === '--') return formatted;
+	if (isKrw(stock)) return formatted;
+	return `${formatted} ${getCurrencyLabel(stock)}`;
 }
 
 function formatPercent(num: number): string {
@@ -135,7 +166,7 @@ export class StockRenderer {
 	private getItemText(stock: Stock): string {
 		const hasHold = stock.hold_num > 0;
 		const showAccountPnL = Configuration.getShowAccountPnL();
-		const formattedPrice = Math.round(stock.price).toLocaleString();
+		const formattedPrice = formatAmountForBar(stock, stock.price);
 		const percentPrefix = getPercentPrefix(stock.riseFallFlag);
 		const base = format(
 			'%s %s (%s%)',
@@ -159,11 +190,21 @@ export class StockRenderer {
 		const percentPrefix = getPercentPrefix(stock.riseFallFlag);
 
 		let markdown = `**${trendIcon} ${stock.getDisplayName()}**\n\n`;
-		markdown += `**${formatNumber(stock.price)}원** (${priceSign}${formatNumber(
-			stock.updown,
-		)}원 / ${percentPrefix}${formatPercent(stock.percent)})\n\n`;
-		markdown += `일중 최고가: ${formatNumber(stock.high)}원\n\n`;
-		markdown += `일중 최저가: ${formatNumber(stock.low)}원\n\n`;
+		markdown += `**${formatAmountWithCurrency(
+			stock,
+			stock.price,
+		)}** (${priceSign}${formatAmountWithCurrency(
+			stock,
+			Math.abs(stock.updown),
+		)} / ${percentPrefix}${formatPercent(stock.percent)})\n\n`;
+		markdown += `일중 최고가: ${formatAmountWithCurrency(
+			stock,
+			stock.high,
+		)}\n\n`;
+		markdown += `일중 최저가: ${formatAmountWithCurrency(
+			stock,
+			stock.low,
+		)}\n\n`;
 
 		if (hasHold) {
 			const dailyPnL = stock.getDailyPnL();
@@ -172,15 +213,16 @@ export class StockRenderer {
 			const totalColor = getPnLColor(totalPnL);
 
 			markdown += `\n---\n\n`;
-			markdown += `**보유:** ${stock.hold_num.toLocaleString()}주 (평단: ${formatNumber(
+			markdown += `**보유:** ${stock.hold_num.toLocaleString()}주 (평단: ${formatAmountWithCurrency(
+				stock,
 				stock.hold_price,
-			)}원)\n\n`;
+			)})\n\n`;
 			markdown += `**일일손익:** ${dailyColor} ${
 				dailyPnL > 0 ? '+' : ''
-			}${formatNumber(dailyPnL)}원\n\n`;
+			}${formatAmountWithCurrency(stock, dailyPnL)}\n\n`;
 			markdown += `**누적손익:** ${totalColor} ${
 				totalPnL > 0 ? '+' : ''
-			}${formatNumber(totalPnL)}원\n`;
+			}${formatAmountWithCurrency(stock, totalPnL)}\n`;
 		}
 
 		const md = new vscode.MarkdownString(markdown);

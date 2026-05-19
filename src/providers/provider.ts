@@ -45,6 +45,21 @@ const FIELD_MAPPING = {
 	nxtOverMarketPriceInfo: 'afterMarketInfo', // 시간외 시장 정보
 } as const;
 
+type StockQuery = string | { code: string };
+
+const KOREAN_CODE_PATTERN = /^\d{6}$/;
+
+const toCode = (item: StockQuery): string =>
+	typeof item === 'string' ? item : item.code;
+
+const isKoreanCode = (code: string): boolean =>
+	KOREAN_CODE_PATTERN.test(code.trim());
+
+const toNumber = (value: unknown): number => {
+	const parsed = Number(value);
+	return Number.isFinite(parsed) ? parsed : 0;
+};
+
 /**
  * Naver 주식 데이터 변환 (한국 주식용)
  */
@@ -73,6 +88,7 @@ class NaverStockTransform {
 		return {
 			code: this.code.toLowerCase(),
 			name: this.mappedData.name,
+			currency: 'KRW',
 			standardPrice: Number(this.mappedData.standardPrice),
 			price: Number(this.mappedData.price),
 			change,
@@ -204,5 +220,461 @@ class NaverStockProvider {
 	}
 }
 
+interface YahooQuote {
+	symbol: string;
+	shortName?: string;
+	longName?: string;
+	regularMarketPrice?: number;
+	regularMarketChange?: number;
+	regularMarketChangePercent?: number;
+	regularMarketPreviousClose?: number;
+	regularMarketOpen?: number;
+	regularMarketDayHigh?: number;
+	regularMarketDayLow?: number;
+	regularMarketVolume?: number;
+	currency?: string;
+	marketState?: string;
+	fullExchangeName?: string;
+	exchange?: string;
+}
+
+interface YahooQuoteResponse {
+	quoteResponse?: {
+		result?: YahooQuote[];
+		error?: unknown;
+	};
+}
+
+interface YahooChartMeta {
+	symbol?: string;
+	currency?: string;
+	marketState?: string;
+	exchangeName?: string;
+	regularMarketPrice?: number;
+	previousClose?: number;
+	chartPreviousClose?: number;
+}
+
+interface YahooChartIndicators {
+	open?: number[];
+	high?: number[];
+	low?: number[];
+	close?: number[];
+	volume?: number[];
+}
+
+interface YahooChartResult {
+	meta?: YahooChartMeta;
+	indicators?: {
+		quote?: YahooChartIndicators[];
+	};
+}
+
+interface YahooChartResponse {
+	chart?: {
+		result?: YahooChartResult[];
+		error?: unknown;
+	};
+}
+
+interface StooqSymbolQuote {
+	symbol?: string;
+	name?: string;
+	open?: string;
+	high?: string;
+	low?: string;
+	close?: string;
+	volume?: string;
+}
+
+interface StooqQuoteResponse {
+	symbols?: StooqSymbolQuote[];
+}
+
+class YahooStockProvider {
+	httpService: AxiosInstance;
+	private readonly requestHeaders = {
+		accept: 'application/json',
+		'user-agent':
+			'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+		referer: 'https://finance.yahoo.com',
+	};
+
+	constructor() {
+		this.httpService = axios.create({
+			timeout: 5000,
+			baseURL: 'https://query2.finance.yahoo.com',
+		});
+	}
+
+	private getLastValue(values?: number[]): number | undefined {
+		if (!values || values.length === 0) return undefined;
+		for (let i = values.length - 1; i >= 0; i -= 1) {
+			const value = values[i];
+			if (value !== undefined && value !== null) return value;
+		}
+		return undefined;
+	}
+
+	private buildQuoteFromChart(
+		symbol: string,
+		chart: YahooChartResult,
+	): YahooQuote | null {
+		const meta = chart.meta;
+		if (!meta) return null;
+		const quote = chart.indicators?.quote?.[0];
+		const open = this.getLastValue(quote?.open);
+		const high = this.getLastValue(quote?.high);
+		const low = this.getLastValue(quote?.low);
+		const close = this.getLastValue(quote?.close);
+		const volume = this.getLastValue(quote?.volume);
+		const price = toNumber(meta.regularMarketPrice ?? close);
+		const previousClose = toNumber(
+			meta.previousClose ?? meta.chartPreviousClose,
+		);
+		const change = previousClose ? price - previousClose : 0;
+		const changePercent = previousClose ? (change / previousClose) * 100 : 0;
+
+		return {
+			symbol: meta.symbol || symbol,
+			shortName: meta.symbol || symbol,
+			regularMarketPrice: price,
+			regularMarketChange: change,
+			regularMarketChangePercent: changePercent,
+			regularMarketPreviousClose: previousClose,
+			regularMarketOpen: toNumber(open),
+			regularMarketDayHigh: toNumber(high),
+			regularMarketDayLow: toNumber(low),
+			regularMarketVolume: toNumber(volume),
+			currency: meta.currency,
+			marketState: meta.marketState,
+			fullExchangeName: meta.exchangeName,
+			exchange: meta.exchangeName,
+		};
+	}
+
+	private async requestChartQuote(symbol: string): Promise<YahooQuote | null> {
+		try {
+			const response = await axios.get(
+				`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
+					symbol,
+				)}`,
+				{
+					params: { range: '1d', interval: '1d' },
+					headers: this.requestHeaders,
+					timeout: 5000,
+				},
+			);
+			const data = response.data as YahooChartResponse;
+			const chart = data?.chart?.result?.[0];
+			return chart ? this.buildQuoteFromChart(symbol, chart) : null;
+		} catch (err: unknown) {
+			return null;
+		}
+	}
+
+	private async requestChartQuotes(symbols: string[]): Promise<YahooQuote[]> {
+		const results = await Promise.all(
+			symbols.map((symbol) => this.requestChartQuote(symbol)),
+		);
+		return results.filter((item): item is YahooQuote => item !== null);
+	}
+
+	private async mergeChartFallback(
+		symbols: string[],
+		results: YahooQuote[],
+	): Promise<YahooQuote[]> {
+		const missing = symbols.filter(
+			(symbol) =>
+				!results.some(
+					(quote) => quote.symbol?.toUpperCase() === symbol.toUpperCase(),
+				),
+		);
+		if (missing.length === 0) return results;
+		const chartResults = await this.requestChartQuotes(missing);
+		return [...results, ...chartResults];
+	}
+
+	private async requestQuotes(symbols: string[]): Promise<YahooQuote[]> {
+		const params = { symbols: symbols.join(',') };
+		try {
+			const response = await this.httpService.get('/v7/finance/quote', {
+				params,
+				headers: this.requestHeaders,
+			});
+			const data = response.data as YahooQuoteResponse;
+			const results = data?.quoteResponse?.result ?? [];
+			return this.mergeChartFallback(symbols, results);
+		} catch (err: unknown) {
+			const error = err as AxiosError;
+			const status = error.response?.status;
+			if (status === 401 || status === 403 || status === 404) {
+				try {
+					const response = await axios.get(
+						'https://query1.finance.yahoo.com/v7/finance/quote',
+						{
+							params,
+							headers: this.requestHeaders,
+							timeout: 5000,
+						},
+					);
+					const data = response.data as YahooQuoteResponse;
+					const results = data?.quoteResponse?.result ?? [];
+					return this.mergeChartFallback(symbols, results);
+				} catch (fallbackErr: unknown) {
+					return this.requestChartQuotes(symbols);
+				}
+			}
+			return this.requestChartQuotes(symbols);
+		}
+	}
+
+	private normalizeSymbol(code: string): {
+		symbol: string;
+		originalCode: string;
+	} {
+		const trimmed = code.trim();
+		const colonIndex = trimmed.indexOf(':');
+		if (colonIndex > 0 && colonIndex < trimmed.length - 1) {
+			return {
+				symbol: trimmed.slice(colonIndex + 1),
+				originalCode: trimmed,
+			};
+		}
+		return { symbol: trimmed, originalCode: trimmed };
+	}
+
+	private toRiseFallFlag(change: number): string {
+		if (change > 0) return '1';
+		if (change < 0) return '4';
+		return '3';
+	}
+
+	private transform(originalCode: string, quote: YahooQuote): Partial<Stock> {
+		const change = toNumber(quote.regularMarketChange);
+		return {
+			code: originalCode.toLowerCase(),
+			name: quote.longName || quote.shortName || quote.symbol || originalCode,
+			currency: quote.currency || '',
+			price: toNumber(quote.regularMarketPrice),
+			change,
+			updown: change,
+			percent: toNumber(quote.regularMarketChangePercent),
+			riseFallFlag: this.toRiseFallFlag(change),
+			marketType: quote.fullExchangeName || quote.exchange || '',
+			marketStatus: quote.marketState || '',
+			yestclose: toNumber(quote.regularMarketPreviousClose),
+			open: toNumber(quote.regularMarketOpen),
+			high: toNumber(quote.regularMarketDayHigh),
+			low: toNumber(quote.regularMarketDayLow),
+			volume: toNumber(quote.regularMarketVolume),
+		};
+	}
+
+	async fetch(codes: StockQuery[]) {
+		try {
+			const codeList = codes.map(toCode).filter((code) => code.trim());
+			const symbolMap = new Map<string, string>();
+			const symbols = codeList
+				.map((code) => this.normalizeSymbol(code))
+				.filter((item) => item.symbol)
+				.map((item) => {
+					const symbol = item.symbol.toUpperCase();
+					if (!symbolMap.has(symbol)) {
+						symbolMap.set(symbol, item.originalCode.toLowerCase());
+					}
+					return symbol;
+				});
+
+			const uniqueSymbols = Array.from(new Set(symbols));
+			if (uniqueSymbols.length === 0) return [];
+
+			const results = await this.requestQuotes(uniqueSymbols);
+			return results
+				.filter((quote) => quote?.symbol)
+				.map((quote) => {
+					const symbol = quote.symbol.toUpperCase();
+					const originalCode =
+						symbolMap.get(symbol) || quote.symbol.toLowerCase();
+					return this.transform(originalCode, quote);
+				});
+		} catch (err: unknown) {
+			const error = err as AxiosError;
+			const status = error.response?.status;
+			if (status === 401 || status === 403 || status === 404) {
+				logger.warn(
+					'YahooStockProvider.fetch - Blocked (%s), fallback will be used',
+					status,
+				);
+				return [];
+			}
+			logger.error('YahooStockProvider.fetch - Error:', error.message);
+			return [];
+		}
+	}
+}
+
+class StooqStockProvider {
+	httpService: AxiosInstance;
+
+	constructor() {
+		this.httpService = axios.create({
+			timeout: 5000,
+			baseURL: 'https://stooq.com',
+		});
+	}
+
+	private normalizeSymbol(code: string): {
+		symbol: string;
+		originalCode: string;
+	} {
+		const trimmed = code.trim();
+		const colonIndex = trimmed.indexOf(':');
+		if (colonIndex > 0 && colonIndex < trimmed.length - 1) {
+			return {
+				symbol: trimmed.slice(colonIndex + 1),
+				originalCode: trimmed,
+			};
+		}
+		return { symbol: trimmed, originalCode: trimmed };
+	}
+
+	private toStooqSymbol(symbol: string): string {
+		const upper = symbol.toUpperCase();
+		if (!upper) return symbol;
+		if (upper.includes('.')) return upper;
+		return `${upper}.US`;
+	}
+
+	private toCurrency(symbol: string): string {
+		const upper = symbol.toUpperCase();
+		if (upper.endsWith('.US')) return 'USD';
+		if (upper.endsWith('.JP') || upper.endsWith('.T')) return 'JPY';
+		if (upper.endsWith('.HK')) return 'HKD';
+		if (upper.endsWith('.L') || upper.endsWith('.LN')) return 'GBP';
+		if (upper.endsWith('.DE') || upper.endsWith('.FR') || upper.endsWith('.PA'))
+			return 'EUR';
+		return '';
+	}
+
+	private toRiseFallFlag(change: number): string {
+		if (change > 0) return '1';
+		if (change < 0) return '4';
+		return '3';
+	}
+
+	private transform(
+		originalCode: string,
+		item: StooqSymbolQuote,
+	): Partial<Stock> | null {
+		const closeRaw = item.close;
+		if (!closeRaw || closeRaw === '-') return null;
+		const price = toNumber(closeRaw);
+		const open = toNumber(item.open);
+		const change = open ? price - open : 0;
+		const percent = open ? (change / open) * 100 : 0;
+		return {
+			code: originalCode.toLowerCase(),
+			name: item.name || item.symbol || originalCode,
+			currency: this.toCurrency(item.symbol || originalCode),
+			price,
+			change,
+			updown: change,
+			percent,
+			riseFallFlag: this.toRiseFallFlag(change),
+			marketType: 'STOOQ',
+			open,
+			high: toNumber(item.high),
+			low: toNumber(item.low),
+			yestclose: open,
+			volume: toNumber(item.volume),
+		};
+	}
+
+	async fetch(codes: StockQuery[]) {
+		try {
+			const codeList = codes.map(toCode).filter((code) => code.trim());
+			if (codeList.length === 0) return [];
+
+			const symbolMap = new Map<string, string>();
+			const symbols = codeList
+				.map((code) => this.normalizeSymbol(code))
+				.filter((item) => item.symbol)
+				.map((item) => {
+					const symbol = this.toStooqSymbol(item.symbol);
+					symbolMap.set(symbol.toUpperCase(), item.originalCode.toLowerCase());
+					return symbol;
+				});
+
+			const uniqueSymbols = Array.from(new Set(symbols));
+			if (uniqueSymbols.length === 0) return [];
+
+			const response = await this.httpService.get('/q/l/', {
+				params: {
+					s: uniqueSymbols.join(','),
+					f: 'sd2t2ohlcvn',
+					h: '1',
+					e: 'json',
+				},
+			});
+
+			const data = response.data as StooqQuoteResponse;
+			const items = data?.symbols ?? [];
+			return items
+				.map((item) => {
+					const symbolKey = (item.symbol || '').toUpperCase();
+					const originalCode = symbolMap.get(symbolKey) || item.symbol || '';
+					return originalCode ? this.transform(originalCode, item) : null;
+				})
+				.filter((item): item is Partial<Stock> => item !== null);
+		} catch (err: unknown) {
+			const error = err as AxiosError;
+			logger.warn('StooqStockProvider.fetch - Error:', error.message);
+			return [];
+		}
+	}
+}
+
+class CompositeStockProvider {
+	constructor(
+		private readonly naver: NaverStockProvider,
+		private readonly yahoo: YahooStockProvider,
+		private readonly stooq: StooqStockProvider,
+	) {}
+
+	async fetch(codes: StockQuery[]) {
+		const codeList = codes.map(toCode);
+		const koreanCodes = codeList.filter((code) => isKoreanCode(code));
+		const foreignCodes = codeList.filter((code) => !isKoreanCode(code));
+
+		const [koreanResult, yahooResult] = await Promise.all([
+			koreanCodes.length ? this.naver.fetch(koreanCodes) : Promise.resolve([]),
+			foreignCodes.length
+				? this.yahoo.fetch(foreignCodes)
+				: Promise.resolve([]),
+		]);
+		const resolvedCodes = new Set(
+			yahooResult
+				.map((item) => item.code)
+				.filter((code): code is string => !!code)
+				.map((code) => code.toLowerCase()),
+		);
+		const missingCodes = foreignCodes.filter(
+			(code) => !resolvedCodes.has(code.toLowerCase()),
+		);
+		const stooqResult = missingCodes.length
+			? await this.stooq.fetch(missingCodes)
+			: [];
+
+		return [...koreanResult, ...yahooResult, ...stooqResult];
+	}
+}
+
 export const naverStockProvider = new NaverStockProvider();
-export const stockProvider = naverStockProvider;
+export const yahooStockProvider = new YahooStockProvider();
+export const stooqStockProvider = new StooqStockProvider();
+export const stockProvider = new CompositeStockProvider(
+	naverStockProvider,
+	yahooStockProvider,
+	stooqStockProvider,
+);

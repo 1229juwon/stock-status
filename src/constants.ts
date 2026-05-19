@@ -4,6 +4,8 @@ export const MESSAGES = {
 		`주식 ${name} (${code})는 이미 존재합니다!`,
 	STOCK_ADDED_SUCCESS: (name: string, code: string) =>
 		`성공적으로 추가됨: ${name} (${code})`,
+	SETTINGS_UNSAVED:
+		'사용자 설정 파일에 저장되지 않은 변경이 있습니다. 저장 후 다시 시도해 주세요.',
 	CONFIG_ERROR:
 		'설정 형식 오류, https://github.com/1229juwon/stock-status 문서를 참고해주세요.',
 } as const;
