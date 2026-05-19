@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
 import { StockOptions } from '../types/stock-status';
-import logger from './logger/logger';
 
 export default class Configuration {
 	/**
@@ -68,11 +67,7 @@ export default class Configuration {
 		const newStocks: StockOptions = Object.entries(stocks).map(
 			([code, alias]) => (alias ? { code, alias } : code),
 		);
-		Configuration.stockBarConfig()
-			.update('stocks', newStocks, 1)
-			.catch((error) => {
-				logger.error('Configuration.updateStocks - Error:', error);
-			});
+		Configuration.stockBarConfig().update('stocks', newStocks, 1);
 		return newStocks;
 	}
 
